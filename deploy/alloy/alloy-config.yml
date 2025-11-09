@@ -1,0 +1,75 @@
+// Alloy configuration for collecting logs from Docker containers and sending to Loki
+
+// Docker logs receiver
+discovery.docker "docker_sd" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Filter to only collect logs from containers with logs label
+discovery.relabel "docker_sd" {
+  targets = discovery.docker.docker_sd.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_logs"]
+    regex         = "true"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+  }
+}
+
+// Docker logs scraper
+loki.source.docker "docker_logs" {
+  targets    = discovery.relabel.docker_sd.output
+  forward_to = [loki.process.docker_logs.receiver]
+}
+
+// Process logs to add labels
+loki.process "docker_logs" {
+  stage.static_labels {
+    values = {
+      app = "mini-attendance",
+      env = "development",
+    }
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+// Write logs to Loki
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Metrics collection from Prometheus endpoints
+prometheus.scrape "backend" {
+  targets = [
+    {
+      __address__ = "backend:8080",
+      job         = "mini-attendance-api",
+    },
+  ]
+  forward_to = [prometheus.remote_write.loki.receiver]
+}
+
+// Write metrics to Loki (via Prometheus remote write)
+prometheus.remote_write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,13 +11,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/trustmedis/mini-attendance/internal/api/http/handler"
+	"github.com/trustmedis/mini-attendance/internal/api/http/middleware"
 	"github.com/trustmedis/mini-attendance/internal/config"
 	"github.com/trustmedis/mini-attendance/internal/infra/db"
 	"github.com/trustmedis/mini-attendance/internal/infra/kafka"
-	"github.com/trustmedis/mini-attendance/internal/infra/redis"
 	"github.com/trustmedis/mini-attendance/internal/infra/observability"
-	"github.com/trustmedis/mini-attendance/internal/api/http/handler"
-	"github.com/trustmedis/mini-attendance/internal/api/http/middleware"
+	"github.com/trustmedis/mini-attendance/internal/infra/redis"
 )
 
 // @title Mini Attendance API
@@ -53,7 +52,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to connect to database", "error", err)
 	}
-	defer dbConn.Close(context.Background())
+	defer dbConn.Close()
 
 	// Run migrations
 	if err := db.RunMigrations(dbConn, cfg.Database.MigrationsPath); err != nil {

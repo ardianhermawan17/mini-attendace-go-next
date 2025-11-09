@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -48,8 +49,21 @@ func (h *Handlers) GetAbsenceReport(c *gin.Context) {
 	startDate := c.DefaultQuery("start_date", time.Now().AddDate(0, -3, 0).Format("2006-01-02"))
 	endDate := c.DefaultQuery("end_date", time.Now().Format("2006-01-02"))
 	status := c.Query("status")
-	page := c.DefaultQuery("page", "1")
-	limit := c.DefaultQuery("limit", "20")
+	pageStr := c.DefaultQuery("page", "1")
+	limitStr := c.DefaultQuery("limit", "20")
+
+	// Parse pagination parameters
+	page := 1
+	if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+		page = p
+	}
+
+	limit := 20
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+
+	offset := (page - 1) * limit
 
 	// Build query
 	query := `SELECT id, user_id, report_date, status, check_in_time, check_out_time, work_hours, notes
@@ -63,7 +77,7 @@ func (h *Handlers) GetAbsenceReport(c *gin.Context) {
 	}
 
 	query += " ORDER BY report_date DESC LIMIT $" + fmt.Sprintf("%d", len(args)+1) + " OFFSET $" + fmt.Sprintf("%d", len(args)+2)
-	args = append(args, limit, "0") // TODO: fix offset calculation
+	args = append(args, limit, offset)
 
 	rows, err := h.db.Query(ctx, query, args...)
 	if err != nil {

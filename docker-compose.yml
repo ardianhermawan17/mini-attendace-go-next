@@ -46,23 +46,24 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      KAFKA_ENABLE_KRAFT: "yes"
-      KAFKA_CFG_NODE_ID: 1
-      KAFKA_KRAFT_CLUSTER_ID: kraft-cluster
-      KAFKA_CFG_PROCESS_ROLES: broker,controller
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
-      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"
       - "9093:9093"
       - "29092:29092"
     volumes:
-      - kafka_data:/bitnami/kafka
+      - kafka_data:/opt/kafka/data
     networks:
       - mini-attendance-network
 
@@ -85,27 +86,67 @@ services:
     ports:
       - "3100:3100"
     volumes:
-      - ./deploy/loki/loki-config.yml:/etc/loki/local-config.yaml
       - loki_data:/loki
-    command: -config.file=/etc/loki/local-config.yaml
+      - ./deploy/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+    user: root
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        mkdir -p /loki /wal /loki/index /loki/cache &&
+        chmod -R 777 /loki /wal &&
+        /usr/bin/loki -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3100/ready",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - mini-attendance-network
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: mini-attendance-alloy
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./deploy/alloy/alloy-config.alloy:/etc/alloy/config.alloy
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: run /etc/alloy/config.alloy --server.http.listen-addr=0.0.0.0:12345
+    depends_on:
+      - loki
+    networks:
+      - mini-attendance-network
+    restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:12.0.1
+    image: grafana/grafana:10.2.0
     container_name: mini-attendance-grafana
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_SECURITY_ADMIN_USER: admin
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
     ports:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning
     depends_on:
-      - loki
+      loki:
+        condition: service_healthy
     networks:
       - mini-attendance-network
+    restart: unless-stopped
 
   backend:
     build:
@@ -124,7 +165,7 @@ services:
       DB_SSLMODE: disable
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      KAFKA_BROKERS: kafka:29092
+      KAFKA_BROKERS: kafka:9092
       JWT_SECRET: your-secret-key-change-in-production
       LOG_LEVEL: info
       LOKI_URL: http://loki:3100
@@ -137,6 +178,23 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+    networks:
+      - mini-attendance-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mini-attendance-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
+      NEXT_PUBLIC_APP_NAME: Mini Attendance System
+      NEXT_PUBLIC_APP_VERSION: 1.0.0
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
     networks:
       - mini-attendance-network
     restart: unless-stopped

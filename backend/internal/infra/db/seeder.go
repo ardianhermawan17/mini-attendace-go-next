@@ -12,45 +12,35 @@ import (
 
 type SeederData struct {
 	Users          []UserSeed
-	WorkSchedules  []WorkScheduleSeed
-	Holidays       []HolidaySeed
 	AttendanceData []AttendanceRecordSeed
 }
 
 type UserSeed struct {
-	Email    string
-	Password string
-	FullName string
-	Role     string
-}
-
-type WorkScheduleSeed struct {
+	ID         string
+	Username   string
 	Email      string
-	DayOfWeek  int
-	StartTime  string
-	EndTime    string
-}
-
-type HolidaySeed struct {
-	Date        string
-	Name        string
-	Description string
+	Password   string
+	FullName   string
+	Department string
+	Role       string
 }
 
 type AttendanceRecordSeed struct {
-	Email          string
+	UserEmail      string
 	AttendanceDate string
 	CheckInTime    *string
 	CheckOutTime   *string
+	Status         string
 }
 
+// SeedDatabase seeds the database with initial data
 func SeedDatabase(pool *pgxpool.Pool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Check if data already seeded
 	var count int
-	err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM users").Scan(&count)
+	err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check existing users: %w", err)
 	}
@@ -70,60 +60,32 @@ func SeedDatabase(pool *pgxpool.Pool) error {
 			return fmt.Errorf("failed to hash password: %w", err)
 		}
 
-		var userID string
+		userID := user.ID
+		if userID == "" {
+			userID = uuid.New().String()
+		}
+
 		err = pool.QueryRow(ctx,
-			`INSERT INTO users (email, password_hash, full_name, role, is_active)
-			 VALUES ($1, $2, $3, $4, TRUE)
+			`INSERT INTO users (id, username, email, password_hash, full_name, department, role, status)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			 ON CONFLICT (username) DO NOTHING
 			 RETURNING id`,
-			user.Email, string(hashedPassword), user.FullName, user.Role,
+			userID, user.Username, user.Email, string(hashedPassword), user.FullName, user.Department, user.Role, "active",
 		).Scan(&userID)
 
 		if err != nil {
-			return fmt.Errorf("failed to seed user %s: %w", user.Email, err)
+			return fmt.Errorf("failed to seed user %s: %w", user.Username, err)
 		}
 
 		userMap[user.Email] = userID
-		fmt.Printf("✓ Seeded user: %s\n", user.Email)
+		fmt.Printf("✓ Seeded user: %s (Role: %s)\n", user.Email, user.Role)
 	}
-
-	// Seed work schedules
-	for _, schedule := range data.WorkSchedules {
-		userID, exists := userMap[schedule.Email]
-		if !exists {
-			return fmt.Errorf("user %s not found for work schedule", schedule.Email)
-		}
-
-		_, err := pool.Exec(ctx,
-			`INSERT INTO work_schedules (user_id, day_of_week, start_time, end_time, is_active)
-			 VALUES ($1, $2, $3, $4, TRUE)`,
-			userID, schedule.DayOfWeek, schedule.StartTime, schedule.EndTime,
-		)
-
-		if err != nil {
-			return fmt.Errorf("failed to seed work schedule: %w", err)
-		}
-	}
-	fmt.Printf("✓ Seeded %d work schedules\n", len(data.WorkSchedules))
-
-	// Seed holidays
-	for _, holiday := range data.Holidays {
-		_, err := pool.Exec(ctx,
-			`INSERT INTO holidays (holiday_date, holiday_name, description)
-			 VALUES ($1, $2, $3)`,
-			holiday.Date, holiday.Name, holiday.Description,
-		)
-
-		if err != nil {
-			return fmt.Errorf("failed to seed holiday: %w", err)
-		}
-	}
-	fmt.Printf("✓ Seeded %d holidays\n", len(data.Holidays))
 
 	// Seed attendance records
 	for _, record := range data.AttendanceData {
-		userID, exists := userMap[record.Email]
+		userID, exists := userMap[record.UserEmail]
 		if !exists {
-			return fmt.Errorf("user %s not found for attendance record", record.Email)
+			return fmt.Errorf("user %s not found for attendance record", record.UserEmail)
 		}
 
 		var checkInTime, checkOutTime *time.Time
@@ -144,9 +106,10 @@ func SeedDatabase(pool *pgxpool.Pool) error {
 		}
 
 		_, err := pool.Exec(ctx,
-			`INSERT INTO attendance_records (id, user_id, attendance_date, check_in_at, check_out_at, check_in_source, check_out_source)
-			 VALUES ($1, $2, $3, $4, $5, 'mobile', 'mobile')`,
-			uuid.New(), userID, record.AttendanceDate, checkInTime, checkOutTime,
+			`INSERT INTO attendance_records (id, user_id, attendance_date, check_in_time, check_out_time, status)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (user_id, attendance_date) DO NOTHING`,
+			uuid.New(), userID, record.AttendanceDate, checkInTime, checkOutTime, record.Status,
 		)
 
 		if err != nil {
@@ -163,6 +126,7 @@ func getSeederData() SeederData {
 	today := time.Now()
 	yesterday := today.AddDate(0, 0, -1)
 	twoDaysAgo := today.AddDate(0, 0, -2)
+	threeDaysAgo := today.AddDate(0, 0, -3)
 
 	checkInYesterday := yesterday.Format("2006-01-02") + " 08:30:00"
 	checkOutYesterday := yesterday.Format("2006-01-02") + " 17:00:00"
@@ -170,83 +134,83 @@ func getSeederData() SeederData {
 	checkInTwoDaysAgo := twoDaysAgo.Format("2006-01-02") + " 09:15:00"
 	checkOutTwoDaysAgo := twoDaysAgo.Format("2006-01-02") + " 17:30:00"
 
+	checkInThreeDaysAgo := threeDaysAgo.Format("2006-01-02") + " 07:45:00"
+	checkOutThreeDaysAgo := threeDaysAgo.Format("2006-01-02") + " 16:45:00"
+
 	return SeederData{
 		Users: []UserSeed{
 			{
-				Email:    "admin@trustmedis.com",
-				Password: "admin123",
-				FullName: "Admin User",
-				Role:     "admin",
+				ID:         "550e8400-e29b-41d4-a716-446655440001",
+				Username:   "admin",
+				Email:      "admin@trustmedis.com",
+				Password:   "admin123",
+				FullName:   "Admin User",
+				Department: "IT",
+				Role:       "admin",
 			},
 			{
-				Email:    "john.doe@trustmedis.com",
-				Password: "password123",
-				FullName: "John Doe",
-				Role:     "employee",
+				ID:         "550e8400-e29b-41d4-a716-446655440002",
+				Username:   "john_doe",
+				Email:      "john.doe@trustmedis.com",
+				Password:   "password123",
+				FullName:   "John Doe",
+				Department: "HR",
+				Role:       "employee",
 			},
 			{
-				Email:    "jane.smith@trustmedis.com",
-				Password: "password123",
-				FullName: "Jane Smith",
-				Role:     "employee",
+				ID:         "550e8400-e29b-41d4-a716-446655440003",
+				Username:   "jane_smith",
+				Email:      "jane.smith@trustmedis.com",
+				Password:   "password123",
+				FullName:   "Jane Smith",
+				Department: "Finance",
+				Role:       "employee",
 			},
 			{
-				Email:    "bob.wilson@trustmedis.com",
-				Password: "password123",
-				FullName: "Bob Wilson",
-				Role:     "employee",
-			},
-		},
-		WorkSchedules: []WorkScheduleSeed{
-			// Monday to Friday: 08:00 - 17:00
-			{Email: "john.doe@trustmedis.com", DayOfWeek: 1, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "john.doe@trustmedis.com", DayOfWeek: 2, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "john.doe@trustmedis.com", DayOfWeek: 3, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "john.doe@trustmedis.com", DayOfWeek: 4, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "john.doe@trustmedis.com", DayOfWeek: 5, StartTime: "08:00", EndTime: "17:00"},
-
-			{Email: "jane.smith@trustmedis.com", DayOfWeek: 1, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "jane.smith@trustmedis.com", DayOfWeek: 2, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "jane.smith@trustmedis.com", DayOfWeek: 3, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "jane.smith@trustmedis.com", DayOfWeek: 4, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "jane.smith@trustmedis.com", DayOfWeek: 5, StartTime: "08:00", EndTime: "17:00"},
-
-			{Email: "bob.wilson@trustmedis.com", DayOfWeek: 1, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "bob.wilson@trustmedis.com", DayOfWeek: 2, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "bob.wilson@trustmedis.com", DayOfWeek: 3, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "bob.wilson@trustmedis.com", DayOfWeek: 4, StartTime: "08:00", EndTime: "17:00"},
-			{Email: "bob.wilson@trustmedis.com", DayOfWeek: 5, StartTime: "08:00", EndTime: "17:00"},
-		},
-		Holidays: []HolidaySeed{
-			{
-				Date:        "2024-01-01",
-				Name:        "New Year's Day",
-				Description: "Public holiday",
-			},
-			{
-				Date:        "2024-12-25",
-				Name:        "Christmas Day",
-				Description: "Public holiday",
+				ID:         "550e8400-e29b-41d4-a716-446655440004",
+				Username:   "bob_manager",
+				Email:      "bob.manager@trustmedis.com",
+				Password:   "password123",
+				FullName:   "Bob Manager",
+				Department: "Operations",
+				Role:       "manager",
 			},
 		},
 		AttendanceData: []AttendanceRecordSeed{
 			{
-				Email:          "john.doe@trustmedis.com",
+				UserEmail:      "john.doe@trustmedis.com",
 				AttendanceDate: yesterday.Format("2006-01-02"),
 				CheckInTime:    &checkInYesterday,
 				CheckOutTime:   &checkOutYesterday,
+				Status:         "present",
 			},
 			{
-				Email:          "jane.smith@trustmedis.com",
+				UserEmail:      "jane.smith@trustmedis.com",
 				AttendanceDate: yesterday.Format("2006-01-02"),
 				CheckInTime:    &checkInYesterday,
 				CheckOutTime:   &checkOutYesterday,
+				Status:         "present",
 			},
 			{
-				Email:          "john.doe@trustmedis.com",
+				UserEmail:      "john.doe@trustmedis.com",
 				AttendanceDate: twoDaysAgo.Format("2006-01-02"),
 				CheckInTime:    &checkInTwoDaysAgo,
 				CheckOutTime:   &checkOutTwoDaysAgo,
+				Status:         "late",
+			},
+			{
+				UserEmail:      "jane.smith@trustmedis.com",
+				AttendanceDate: twoDaysAgo.Format("2006-01-02"),
+				CheckInTime:    nil,
+				CheckOutTime:   nil,
+				Status:         "absent",
+			},
+			{
+				UserEmail:      "bob_manager@trustmedis.com",
+				AttendanceDate: threeDaysAgo.Format("2006-01-02"),
+				CheckInTime:    &checkInThreeDaysAgo,
+				CheckOutTime:   &checkOutThreeDaysAgo,
+				Status:         "present",
 			},
 		},
 	}
