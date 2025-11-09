@@ -1,15 +1,20 @@
 'use client';
 
-import React from 'react';
+import React, { ReactNode } from 'react';
 import { Provider } from 'react-redux';
 import { store } from '@/store';
+import { AuthHydrationProvider } from './AuthHydrationProvider';
 
 interface ReduxProviderProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 export const ReduxProvider: React.FC<ReduxProviderProps> = ({ children }) => {
-  return <Provider store={store}>{children}</Provider>;
+  return (
+    <Provider store={store}>
+      <AuthHydrationProvider>{children}</AuthHydrationProvider>
+    </Provider>
+  );
 };
 
 export default ReduxProvider;

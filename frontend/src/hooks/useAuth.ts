@@ -23,6 +23,8 @@ export const useAuth = () => {
             expiresIn: response.expires_in,
           })
         );
+        // Persist user to localStorage for hydration on page reload
+        localStorage.setItem('user', JSON.stringify(response.user));
         return response;
       } catch (error: any) {
         const errorMessage = error?.data?.error?.message || 'Login failed';
@@ -37,6 +39,8 @@ export const useAuth = () => {
     try {
       await logoutMutation().unwrap();
       dispatch(logout());
+      // Clear persisted user data from localStorage
+      localStorage.removeItem('user');
     } catch (error: any) {
       const errorMessage = error?.data?.error?.message || 'Logout failed';
       dispatch(setError(errorMessage));
