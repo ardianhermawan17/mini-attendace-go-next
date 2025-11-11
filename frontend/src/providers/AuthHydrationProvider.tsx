@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect } from 'react';
 import { useAppDispatch } from '@/store';
-import { setUser, setTokens } from '@/store/slices/auth/auth.slice';
+import { setUser, setTokens, setHydrated } from '@/store/slices/auth/auth.slice';
 import Cookies from 'js-cookie';
 import { User } from '@/types';
 
@@ -46,6 +46,9 @@ export const AuthHydrationProvider: React.FC<AuthHydrationProviderProps> = ({ ch
         }
       }
     }
+
+    // Mark hydration as complete
+    dispatch(setHydrated());
   }, [dispatch]);
 
   return <>{children}</>;

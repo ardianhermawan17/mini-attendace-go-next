@@ -10,6 +10,7 @@ const initialState: AuthState = {
   accessToken: null,
   refreshToken: null,
   expiresIn: null,
+  isHydrated: false,
 };
 
 const authSlice = createSlice({
@@ -49,10 +50,13 @@ const authSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
+    setHydrated: (state) => {
+      state.isHydrated = true;
+    },
   },
 });
 
-export const { setUser, setTokens, setLoading, setError, logout, clearError } =
+export const { setUser, setTokens, setLoading, setError, logout, clearError, setHydrated } =
   authSlice.actions;
 
 export default authSlice.reducer;
