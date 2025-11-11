@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect } from 'react';
 import { useAppDispatch } from '@/store';
-import { setUser, setTokens } from '@/store/slices/auth/auth.slice';
+import { setUser, setTokens, setHydrated } from '@/store/slices/auth/auth.slice';
 import Cookies from 'js-cookie';
 import { User } from '@/types';
 
@@ -19,9 +19,13 @@ export const AuthHydrationProvider: React.FC<AuthHydrationProviderProps> = ({ ch
 
   useEffect(() => {
     // Hydrate auth state from persisted storage on app initialization
+    console.log('AuthHydrationProvider: Starting hydration...');
     const accessToken = Cookies.get('access_token');
     const refreshToken = Cookies.get('refresh_token');
     const userJson = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+
+    console.log('AuthHydrationProvider: accessToken exists:', !!accessToken);
+    console.log('AuthHydrationProvider: userJson exists:', !!userJson);
 
     if (accessToken && userJson) {
       try {
@@ -36,6 +40,7 @@ export const AuthHydrationProvider: React.FC<AuthHydrationProviderProps> = ({ ch
             expiresIn: 3600, // Default 1 hour
           })
         );
+        console.log('AuthHydrationProvider: Auth state restored successfully');
       } catch (error) {
         console.error('Failed to hydrate auth state:', error);
         // Clear invalid data
@@ -46,6 +51,10 @@ export const AuthHydrationProvider: React.FC<AuthHydrationProviderProps> = ({ ch
         }
       }
     }
+
+    // Mark hydration as complete
+    dispatch(setHydrated(true));
+    console.log('AuthHydrationProvider: Hydration complete');
   }, [dispatch]);
 
   return <>{children}</>;

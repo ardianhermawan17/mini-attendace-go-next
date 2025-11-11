@@ -8,4 +8,5 @@ export interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   expiresIn: number | null;
+  isHydrated: boolean;
 }
